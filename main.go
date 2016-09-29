@@ -1,0 +1,128 @@
+package main
+
+import (
+	"bufio"
+	"crypto/tls"
+	"fmt"
+	"os"
+	"strings"
+
+	irc "github.com/fluffle/goirc/client"
+	"github.com/mitnk/ircbot/db"
+)
+
+func main() {
+	rooms := db.GetRoomList()
+
+
+	cfg := irc.NewConfig("xshuiniu")
+	cfg.SSL = true
+	cfg.SSLConfig = &tls.Config{ServerName: "irc.freenode.net"}
+	cfg.Server = "irc.freenode.net:7000"
+	cfg.NewNick = func(n string) string { return n + "^" }
+	// cfg.Proxy = "socks5://127.0.0.1:1080"
+	c := irc.Client(cfg)
+
+	c.EnableStateTracking()
+	// Add handlers to do things here!
+	// e.g. join a channel on connect.
+	c.HandleFunc(irc.CONNECTED,
+		func(conn *irc.Conn, line *irc.Line) {
+			for rooms.Next() {
+				var id int
+				var room_name string
+				rooms.Scan(&id, &room_name)
+				if strings.HasPrefix(room_name, "#") {
+					conn.Join(room_name)
+				} else {
+					conn.Join(fmt.Sprintf("#%s", room_name))
+				}
+				fmt.Printf("Joined room %s\n", room_name)
+			}
+			defer rooms.Close()
+	})
+
+	// Set up a handler to notify of disconnect events.
+	quit := make(chan bool)
+	c.HandleFunc("disconnected",
+		func(conn *irc.Conn, line *irc.Line) { quit <- true })
+
+	c.HandleFunc(irc.NOTICE,
+		func(conn *irc.Conn, line *irc.Line) {
+			fmt.Printf("%s %s %s %s\n", line.Nick, line.Cmd, line.Args, line.Time)
+	})
+	c.HandleFunc(irc.PRIVMSG,
+		func(conn *irc.Conn, line *irc.Line) {
+			room := line.Args[0]
+			msg := line.Args[1]
+			db.SaveMessage(room, line.Nick, msg, "M", line.Time)
+			fmt.Printf("[%s][%s]%s: %s\n", line.Time.Format("15:04:05.000"), room, line.Nick, msg)
+	})
+	c.HandleFunc(irc.ACTION,
+		func(conn *irc.Conn, line *irc.Line) {
+			fmt.Printf("%s %s %s %s\n", line.Nick, line.Cmd, line.Args, line.Time)
+			room := line.Args[0]
+			msg := line.Args[1]
+			db.SaveMessage(room, line.Nick, msg, "A", line.Time)
+			fmt.Printf("[%s][%s]%s: %s\n", line.Time.Format("15:04:05.000"), room, line.Nick, msg)
+	})
+
+
+	// set up a goroutine to read commands from stdin
+	in := make(chan string, 4)
+	reallyquit := false
+	go func() {
+		con := bufio.NewReader(os.Stdin)
+		for {
+			s, err := con.ReadString('\n')
+			if err != nil {
+				// wha?, maybe ctrl-D...
+				close(in)
+				break
+			}
+			// no point in sending empty lines down the channel
+			if len(s) > 2 {
+				in <- s[0 : len(s)-1]
+			}
+		}
+	}()
+
+	// set up a goroutine to do parsey things with the stuff from stdin
+	go func() {
+		for cmd := range in {
+			if cmd[0] == ':' {
+				switch idx := strings.Index(cmd, " "); {
+				case cmd[1] == 'd':
+					fmt.Printf(c.String())
+				case cmd[1] == 'f':
+					c.Privmsg("#ircbotgogogo", cmd[idx+1:])
+				case idx == -1:
+					continue
+				case cmd[1] == 'q':
+					reallyquit = true
+					c.Quit(cmd[idx+1 : len(cmd)])
+				case cmd[1] == 's':
+					reallyquit = true
+					c.Close()
+				case cmd[1] == 'j':
+					c.Join(cmd[idx+1 : len(cmd)])
+				case cmd[1] == 'p':
+					c.Part(cmd[idx+1 : len(cmd)])
+				}
+			} else {
+				c.Raw(cmd)
+			}
+		}
+	}()
+
+	for !reallyquit {
+		// connect to server
+		if err := c.ConnectTo("irc.freenode.net"); err != nil {
+			fmt.Printf("Connection error: %s\n", err)
+			return
+		}
+
+		// wait on quit channel
+		<-quit
+	}
+}
