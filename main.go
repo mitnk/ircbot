@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -12,15 +13,23 @@ import (
 )
 
 func main() {
-	rooms := db.GetRoomList()
+	var host = flag.String("host", "chat.freenode.net",
+		"IRC server host")
+	var port = flag.Int("port", 7000, "IRC server port")
+	var nick = flag.String("nick", "shuiniu", "IRC nick name")
+	var nossl = flag.Bool("nossl", false, "Do not use SSL")
+	var proxy = flag.String("proxy", "",
+		"HTTP or Socks proxy, e.g. socks5://localhost:1080")
+	flag.Parse()
 
-
-	cfg := irc.NewConfig("xshuiniu")
-	cfg.SSL = true
-	cfg.SSLConfig = &tls.Config{ServerName: "irc.freenode.net"}
-	cfg.Server = "irc.freenode.net:7000"
+	cfg := irc.NewConfig(*nick)
+	cfg.SSL = !(*nossl)
+	cfg.SSLConfig = &tls.Config{ServerName: *host}
+	cfg.Server = fmt.Sprintf("%s:%d", *host, *port)
 	cfg.NewNick = func(n string) string { return n + "^" }
-	// cfg.Proxy = "socks5://127.0.0.1:1080"
+	if len(*proxy) > 0 {
+		cfg.Proxy = *proxy
+	}
 	c := irc.Client(cfg)
 
 	c.EnableStateTracking()
@@ -28,6 +37,8 @@ func main() {
 	// e.g. join a channel on connect.
 	c.HandleFunc(irc.CONNECTED,
 		func(conn *irc.Conn, line *irc.Line) {
+			fmt.Println("Connected to IRC Server.")
+			rooms := db.GetRoomList()
 			for rooms.Next() {
 				var id int
 				var room_name string
@@ -39,18 +50,21 @@ func main() {
 				}
 				fmt.Printf("Joined room %s\n", room_name)
 			}
-			defer rooms.Close()
-	})
+		})
 
 	// Set up a handler to notify of disconnect events.
 	quit := make(chan bool)
-	c.HandleFunc("disconnected",
-		func(conn *irc.Conn, line *irc.Line) { quit <- true })
+	c.HandleFunc("DISCONNECTED",
+		func(conn *irc.Conn, line *irc.Line) {
+			fmt.Println("Disconnected from IRC Server.")
+			quit <- true
+		})
 
 	c.HandleFunc(irc.NOTICE,
 		func(conn *irc.Conn, line *irc.Line) {
 			fmt.Printf("%s %s %s %s\n", line.Nick, line.Cmd, line.Args, line.Time)
 	})
+
 	c.HandleFunc(irc.PRIVMSG,
 		func(conn *irc.Conn, line *irc.Line) {
 			room := line.Args[0]
@@ -92,10 +106,15 @@ func main() {
 		for cmd := range in {
 			if cmd[0] == ':' {
 				switch idx := strings.Index(cmd, " "); {
-				case cmd[1] == 'd':
-					fmt.Printf(c.String())
-				case cmd[1] == 'f':
-					c.Privmsg("#ircbotgogogo", cmd[idx+1:])
+				case cmd[1] == 'm':
+					inner_cmd := cmd[idx+1:]
+					inner_idx := strings.Index(inner_cmd, " ")
+					if inner_idx == -1 {
+						continue
+					}
+					channel := inner_cmd[:inner_idx]
+					msg := inner_cmd[inner_idx+1:]
+					c.Privmsg(channel, msg)
 				case idx == -1:
 					continue
 				case cmd[1] == 'q':
@@ -106,8 +125,6 @@ func main() {
 					c.Close()
 				case cmd[1] == 'j':
 					c.Join(cmd[idx+1 : len(cmd)])
-				case cmd[1] == 'p':
-					c.Part(cmd[idx+1 : len(cmd)])
 				}
 			} else {
 				c.Raw(cmd)
@@ -117,7 +134,7 @@ func main() {
 
 	for !reallyquit {
 		// connect to server
-		if err := c.ConnectTo("irc.freenode.net"); err != nil {
+		if err := c.Connect(); err != nil {
 			fmt.Printf("Connection error: %s\n", err)
 			return
 		}

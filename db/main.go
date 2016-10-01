@@ -19,7 +19,8 @@ func GetRoomList() *sql.Rows {
 		"freenode")
 	if err != nil {
 		log.Fatal(err)
-    }
+	}
+	// defer results.Close()
 	return results
 }
 
@@ -57,5 +58,5 @@ func SaveMessage(room string, nick string, msg string, typ string, ts time.Time)
 		nick, msg, ts, room_id, typ)
 	if err != nil {
 		log.Fatal(err)
-    }
+	}
 }
