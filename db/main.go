@@ -8,15 +8,16 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func GetRoomList() *sql.Rows {
+func GetRoomList(host string) *sql.Rows {
 	db, err := sql.Open("postgres", "user=mitnk dbname=djapps sslmode=disable")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 	results, err := db.Query(
-		"select r.id, r.name from irc_room r join irc_host h on r.host_id = h.id where h.name = $1",
-		"freenode")
+		"select r.id, r.name from irc_room r join irc_host h " +
+			"on r.host_id = h.id where h.name = $1",
+		host)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -43,7 +44,7 @@ func GetRoomId(host, room string) int {
 	return 0
 }
 
-func SaveMessage(room string, nick string, msg string, typ string, ts time.Time) {
+func SaveMessage(host, room, nick, msg, typ string, ts time.Time) {
 	if !strings.HasPrefix(room, "##") {
 		room = strings.Trim(room, "#")
 	}
@@ -52,7 +53,7 @@ func SaveMessage(room string, nick string, msg string, typ string, ts time.Time)
 		log.Fatal(err)
 	}
 	defer db.Close()
-	room_id := GetRoomId("freenode", room)
+	room_id := GetRoomId(host, room)
 	db.Exec(
 		"INSERT INTO irc_message (nick, msg, added, room_id, typ) values($1, $2, $3, $4, $5)",
 		nick, msg, ts, room_id, typ)

@@ -13,9 +13,12 @@ import (
 )
 
 func main() {
-	var host = flag.String("host", "chat.freenode.net",
+	var irchost = flag.String("irchost", "chat.freenode.net",
 		"IRC server host")
-	var port = flag.Int("port", 7000, "IRC server port")
+	var ircport = flag.Int("ircport", 7000, "IRC server port")
+
+	var hostname = flag.String("hostname", "freenode", "irc host name in DB")
+
 	var nick = flag.String("nick", "shuiniu", "IRC nick name")
 	var nossl = flag.Bool("nossl", false, "Do not use SSL")
 	var proxy = flag.String("proxy", "",
@@ -24,8 +27,8 @@ func main() {
 
 	cfg := irc.NewConfig(*nick)
 	cfg.SSL = !(*nossl)
-	cfg.SSLConfig = &tls.Config{ServerName: *host}
-	cfg.Server = fmt.Sprintf("%s:%d", *host, *port)
+	cfg.SSLConfig = &tls.Config{ServerName: *irchost}
+	cfg.Server = fmt.Sprintf("%s:%d", *irchost, *ircport)
 	cfg.NewNick = func(n string) string { return n + "^" }
 	if len(*proxy) > 0 {
 		cfg.Proxy = *proxy
@@ -38,7 +41,7 @@ func main() {
 	c.HandleFunc(irc.CONNECTED,
 		func(conn *irc.Conn, line *irc.Line) {
 			fmt.Println("Connected to IRC Server.")
-			rooms := db.GetRoomList()
+			rooms := db.GetRoomList(*hostname)
 			for rooms.Next() {
 				var id int
 				var room_name string
@@ -69,7 +72,7 @@ func main() {
 		func(conn *irc.Conn, line *irc.Line) {
 			room := line.Args[0]
 			msg := line.Args[1]
-			db.SaveMessage(room, line.Nick, msg, "M", line.Time)
+			db.SaveMessage(*hostname, room, line.Nick, msg, "M", line.Time)
 			fmt.Printf("[%s][%s]%s: %s\n", line.Time.Format("15:04:05.000"), room, line.Nick, msg)
 	})
 	c.HandleFunc(irc.ACTION,
@@ -77,7 +80,7 @@ func main() {
 			fmt.Printf("%s %s %s %s\n", line.Nick, line.Cmd, line.Args, line.Time)
 			room := line.Args[0]
 			msg := line.Args[1]
-			db.SaveMessage(room, line.Nick, msg, "A", line.Time)
+			db.SaveMessage(*hostname, room, line.Nick, msg, "A", line.Time)
 			fmt.Printf("[%s][%s]%s: %s\n", line.Time.Format("15:04:05.000"), room, line.Nick, msg)
 	})
 
