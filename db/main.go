@@ -1,11 +1,11 @@
 package db
 
 import (
+	"database/sql"
+	_ "github.com/lib/pq"
 	"log"
 	"strings"
 	"time"
-	"database/sql"
-	_ "github.com/lib/pq"
 )
 
 func GetRoomList(host string) *sql.Rows {
@@ -14,9 +14,9 @@ func GetRoomList(host string) *sql.Rows {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	results, err := db.Query(
-		"select r.id, r.name from irc_room r join irc_host h " +
-			"on r.host_id = h.id where h.name = $1",
+	results, err := db.Query("select r.id, r.name "+
+		"from irc_room r join irc_host h "+
+		"on r.host_id = h.id where h.name = $1",
 		host)
 	if err != nil {
 		log.Fatal(err)
@@ -27,8 +27,8 @@ func GetRoomList(host string) *sql.Rows {
 
 func GetRoomId(host, room string) int {
 	query := "SELECT r.id FROM " +
-		  "irc_room r JOIN irc_host h ON r.host_id = h.id " +
-		  "WHERE h.name = $1 and r.name = $2"
+		"irc_room r JOIN irc_host h ON r.host_id = h.id " +
+		"WHERE h.name = $1 and r.name = $2"
 	db, err := sql.Open("postgres", "user=mitnk dbname=djapps sslmode=disable")
 	if err != nil {
 		log.Fatal(err)

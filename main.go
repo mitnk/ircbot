@@ -66,15 +66,17 @@ func main() {
 	c.HandleFunc(irc.NOTICE,
 		func(conn *irc.Conn, line *irc.Line) {
 			fmt.Printf("%s %s %s %s\n", line.Nick, line.Cmd, line.Args, line.Time)
-	})
+		})
 
 	c.HandleFunc(irc.PRIVMSG,
 		func(conn *irc.Conn, line *irc.Line) {
 			room := line.Args[0]
 			msg := line.Args[1]
 			db.SaveMessage(*hostname, room, line.Nick, msg, "M", line.Time)
-			fmt.Printf("[%s][%s]%s: %s\n", line.Time.Format("15:04:05.000"), room, line.Nick, msg)
-	})
+			fmt.Printf("[%s][%s]%s: %s\n",
+				line.Time.Format("15:04:05.000"),
+				room, line.Nick, msg)
+		})
 	c.HandleFunc(irc.ACTION,
 		func(conn *irc.Conn, line *irc.Line) {
 			fmt.Printf("%s %s %s %s\n", line.Nick, line.Cmd, line.Args, line.Time)
@@ -82,8 +84,7 @@ func main() {
 			msg := line.Args[1]
 			db.SaveMessage(*hostname, room, line.Nick, msg, "A", line.Time)
 			fmt.Printf("[%s][%s]%s: %s\n", line.Time.Format("15:04:05.000"), room, line.Nick, msg)
-	})
-
+		})
 
 	// set up a goroutine to read commands from stdin
 	in := make(chan string, 4)
