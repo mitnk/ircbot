@@ -85,7 +85,7 @@ func MonitorIRCHost(host db.Host, proxy, dbname, user string, wg sync.WaitGroup)
 			msg := line.Args[1]
 			db.SaveMessage(host, dbname, user, room, line.Nick, msg, "M", line.Time)
 			fmt.Printf("[%s][%s][%s]%s: %s\n",
-				line.Time.Format("15:04:05.000"),
+				line.Time.Format("15:04:05"),
 				host.Name, room, line.Nick, msg)
 		})
 	c.HandleFunc(irc.ACTION,
@@ -94,7 +94,7 @@ func MonitorIRCHost(host db.Host, proxy, dbname, user string, wg sync.WaitGroup)
 			msg := line.Args[1]
 			db.SaveMessage(host, dbname, user, room, line.Nick, msg, "A", line.Time)
 			fmt.Printf("[%s][%s][%s]%s [ACTION] %s\n",
-				line.Time.Format("15:04:05.000"),
+				line.Time.Format("15:04:05"),
 				host.Name, room, line.Nick, msg)
 		})
 
