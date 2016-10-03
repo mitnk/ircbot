@@ -93,7 +93,6 @@ func getRoomId(db *sql.DB, host, room string) int {
 		results.Scan(&id)
 		return id
 	}
-	defer results.Close()
 	return 0
 }
 
@@ -109,6 +108,7 @@ func SaveMessage(host Host, dbname, user, room, nick, msg, typ string, ts time.T
 		"values($1, $2, $3, $4, $5)",
 		nick, msg, ts, room_id, typ)
 	if err != nil {
+		fmt.Printf("%s, %s, %s, %d, %s\n", nick, msg, ts, room_id, typ)
 		log.Fatal(err)
 	}
 }
