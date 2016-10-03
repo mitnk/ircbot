@@ -80,7 +80,9 @@ func getRoomRecords(host, dbname, user string) *sql.Rows {
 	return results
 }
 
-func getRoomId(db *sql.DB, host, room string) int {
+func getRoomId(dbname, user, host, room string) int {
+	db := getDB(dbname, user)
+	defer db.Close()
 	query := "SELECT r.id FROM " +
 		"irc_room r JOIN irc_host h ON r.host_id = h.id " +
 		"WHERE h.name = $1 and r.name = $2"
@@ -102,13 +104,16 @@ func SaveMessage(host Host, dbname, user, room, nick, msg, typ string, ts time.T
 	if !strings.HasPrefix(room, "##") {
 		room = strings.Trim(room, "#")
 	}
-	room_id := getRoomId(db, host.Name, room)
+	room_id := getRoomId(dbname, user, host.Name, room)
+	if room_id == 0 {
+		fmt.Printf("Rood id not found: %s %s %s %s\n", host.Name, room)
+		return
+	}
 	_, err := db.Exec("INSERT INTO irc_message "+
 		"(nick, msg, added, room_id, typ) "+
 		"values($1, $2, $3, $4, $5)",
 		nick, msg, ts, room_id, typ)
 	if err != nil {
-		fmt.Printf("%s, %s, %s, %d, %s\n", nick, msg, ts, room_id, typ)
 		log.Fatal(err)
 	}
 }
