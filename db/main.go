@@ -106,7 +106,7 @@ func SaveMessage(host Host, dbname, user, room, nick, msg, typ string, ts time.T
 	}
 	room_id := getRoomId(dbname, user, host.Name, room)
 	if room_id == 0 {
-		fmt.Printf("Rood id not found: %s %s %s %s\n", host.Name, room)
+		fmt.Printf("Rood id not found: host:%s room:%s\n", host.Name, room)
 		return
 	}
 	_, err := db.Exec("INSERT INTO irc_message "+
