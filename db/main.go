@@ -17,14 +17,13 @@ type Host struct {
 	Nick string
 }
 
-func getConnectionString(dbname, user string) string {
-	return fmt.Sprintf("dbname=%s user=%s sslmode=disable",
-		dbname, user)
+type Room struct {
+	Name string
 }
 
 func GetHostList(dbname, user string) []Host {
 	result := make([]Host, 0)
-	hosts := DBGetHostList(dbname, user)
+	hosts := getHostRecords(dbname, user)
 	for hosts.Next() {
 		var name string
 		var host string
@@ -37,12 +36,28 @@ func GetHostList(dbname, user string) []Host {
 	return result
 }
 
-func DBGetHostList(dbname, user string) *sql.Rows {
-	conn_str := getConnectionString(dbname, user)
+func GetRoomList(host Host, dbname, user string) []Room {
+	result := make([]Room, 0)
+	rooms := getRoomRecords(host.Name, dbname, user)
+	for rooms.Next() {
+		var name string
+		rooms.Scan(&name)
+		result = append(result, Room{name})
+	}
+	return result
+}
+
+func getDB(dbname, user string) *sql.DB {
+	conn_str := fmt.Sprintf("dbname=%s user=%s sslmode=disable", dbname, user)
 	db, err := sql.Open("postgres", conn_str)
 	if err != nil {
 		log.Fatal(err)
 	}
+	return db
+}
+
+func getHostRecords(dbname, user string) *sql.Rows {
+	db := getDB(dbname, user)
 	defer db.Close()
 	results, err := db.Query("select name, host, port, ssl, nick from irc_host")
 	if err != nil {
@@ -51,17 +66,13 @@ func DBGetHostList(dbname, user string) *sql.Rows {
 	return results
 }
 
-func GetRoomList(host Host, dbname, user string) *sql.Rows {
-	conn_str := getConnectionString(dbname, user)
-	db, err := sql.Open("postgres", conn_str)
-	if err != nil {
-		log.Fatal(err)
-	}
+func getRoomRecords(host, dbname, user string) *sql.Rows {
+	db := getDB(dbname, user)
 	defer db.Close()
-	results, err := db.Query("select r.id, r.name "+
+	results, err := db.Query("select r.name "+
 		"from irc_room r join irc_host h "+
 		"on r.host_id = h.id where h.name = $1",
-		host.Name)
+		host)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -87,21 +98,15 @@ func getRoomId(db *sql.DB, host, room string) int {
 }
 
 func SaveMessage(host Host, dbname, user, room, nick, msg, typ string, ts time.Time) {
-	conn_str := getConnectionString(dbname, user)
-	db, err := sql.Open("postgres", conn_str)
-	if err != nil {
-		log.Fatal(err)
-	}
-
+	db := getDB(dbname, user)
+	defer db.Close()
 	if !strings.HasPrefix(room, "##") {
 		room = strings.Trim(room, "#")
 	}
-	defer db.Close()
 	room_id := getRoomId(db, host.Name, room)
-	db.Exec(
-		"INSERT INTO irc_message "+
-			"(nick, msg, added, room_id, typ) "+
-			"values($1, $2, $3, $4, $5)",
+	_, err := db.Exec("INSERT INTO irc_message "+
+		"(nick, msg, added, room_id, typ) "+
+		"values($1, $2, $3, $4, $5)",
 		nick, msg, ts, room_id, typ)
 	if err != nil {
 		log.Fatal(err)

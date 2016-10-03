@@ -47,22 +47,21 @@ func MonitorIRCHost(host db.Host, proxy, dbname, user string, wg sync.WaitGroup)
 	c := irc.Client(cfg)
 
 	c.EnableStateTracking()
+
 	// Add handlers to do things here!
 	// e.g. join a channel on connect.
 	c.HandleFunc(irc.CONNECTED,
 		func(conn *irc.Conn, line *irc.Line) {
 			fmt.Println("Connected to IRC Server.")
 			rooms := db.GetRoomList(host, dbname, user)
-			for rooms.Next() {
-				var id int
-				var room_name string
-				rooms.Scan(&id, &room_name)
-				if strings.HasPrefix(room_name, "#") {
-					conn.Join(room_name)
+			for i := 0; i < len(rooms); i++ {
+				name := rooms[i].Name
+				if strings.HasPrefix(name, "#") {
+					conn.Join(name)
 				} else {
-					conn.Join(fmt.Sprintf("#%s", room_name))
+					conn.Join(fmt.Sprintf("#%s", name))
 				}
-				fmt.Printf("Joined room %s\n", room_name)
+				fmt.Printf("Joined room %s\n", name)
 			}
 		})
 
