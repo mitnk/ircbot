@@ -1,37 +1,48 @@
 package main
 
 import (
-	"bufio"
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"os"
 	"strings"
+	"sync"
 
 	irc "github.com/fluffle/goirc/client"
 	"github.com/mitnk/ircbot/db"
 )
 
 func main() {
-	var irchost = flag.String("irchost", "chat.freenode.net",
-		"IRC server host")
-	var ircport = flag.Int("ircport", 7000, "IRC server port")
-
-	var hostname = flag.String("hostname", "freenode", "irc host name in DB")
-
-	var nick = flag.String("nick", "shuiniu", "IRC nick name")
-	var nossl = flag.Bool("nossl", false, "Do not use SSL")
+	var dbname = flag.String("dbname", "ircbot", "PG DB Name")
+	var user = flag.String("user", "ircbot", "PG User Name")
 	var proxy = flag.String("proxy", "",
 		"HTTP or Socks proxy, e.g. socks5://localhost:1080")
 	flag.Parse()
 
-	cfg := irc.NewConfig(*nick)
-	cfg.SSL = !(*nossl)
-	cfg.SSLConfig = &tls.Config{ServerName: *irchost}
-	cfg.Server = fmt.Sprintf("%s:%d", *irchost, *ircport)
+	hosts := db.GetHostList(*dbname, *user)
+	if len(hosts) == 0 {
+		fmt.Printf("no hosts found.\n")
+		return
+	}
+
+	// spawn group of worker goroutines
+	var wg sync.WaitGroup
+	for i := 0; i < len(hosts); i++ {
+		wg.Add(1)
+		host := hosts[i]
+		go MonitorIRCHost(host, *proxy, *dbname, *user, wg)
+	}
+	// wait for the workers to finish
+	wg.Wait()
+}
+
+func MonitorIRCHost(host db.Host, proxy, dbname, user string, wg sync.WaitGroup) {
+	cfg := irc.NewConfig(host.Nick)
+	cfg.SSL = host.Ssl
+	cfg.SSLConfig = &tls.Config{ServerName: host.Host}
+	cfg.Server = fmt.Sprintf("%s:%d", host.Host, host.Port)
 	cfg.NewNick = func(n string) string { return n + "^" }
-	if len(*proxy) > 0 {
-		cfg.Proxy = *proxy
+	if len(proxy) > 0 {
+		cfg.Proxy = proxy
 	}
 	c := irc.Client(cfg)
 
@@ -41,7 +52,7 @@ func main() {
 	c.HandleFunc(irc.CONNECTED,
 		func(conn *irc.Conn, line *irc.Line) {
 			fmt.Println("Connected to IRC Server.")
-			rooms := db.GetRoomList(*hostname)
+			rooms := db.GetRoomList(host, dbname, user)
 			for rooms.Next() {
 				var id int
 				var room_name string
@@ -59,6 +70,7 @@ func main() {
 	quit := make(chan bool)
 	c.HandleFunc("DISCONNECTED",
 		func(conn *irc.Conn, line *irc.Line) {
+			wg.Done()
 			fmt.Println("Disconnected from IRC Server.")
 			quit <- true
 		})
@@ -72,7 +84,7 @@ func main() {
 		func(conn *irc.Conn, line *irc.Line) {
 			room := line.Args[0]
 			msg := line.Args[1]
-			db.SaveMessage(*hostname, room, line.Nick, msg, "M", line.Time)
+			db.SaveMessage(host, dbname, user, room, line.Nick, msg, "M", line.Time)
 			fmt.Printf("[%s][%s]%s: %s\n",
 				line.Time.Format("15:04:05.000"),
 				room, line.Nick, msg)
@@ -82,61 +94,11 @@ func main() {
 			fmt.Printf("%s %s %s %s\n", line.Nick, line.Cmd, line.Args, line.Time)
 			room := line.Args[0]
 			msg := line.Args[1]
-			db.SaveMessage(*hostname, room, line.Nick, msg, "A", line.Time)
+			db.SaveMessage(host, dbname, user, room, line.Nick, msg, "A", line.Time)
 			fmt.Printf("[%s][%s]%s: %s\n", line.Time.Format("15:04:05.000"), room, line.Nick, msg)
 		})
 
-	// set up a goroutine to read commands from stdin
-	in := make(chan string, 4)
-	reallyquit := false
-	go func() {
-		con := bufio.NewReader(os.Stdin)
-		for {
-			s, err := con.ReadString('\n')
-			if err != nil {
-				// wha?, maybe ctrl-D...
-				close(in)
-				break
-			}
-			// no point in sending empty lines down the channel
-			if len(s) > 2 {
-				in <- s[0 : len(s)-1]
-			}
-		}
-	}()
-
-	// set up a goroutine to do parsey things with the stuff from stdin
-	go func() {
-		for cmd := range in {
-			if cmd[0] == ':' {
-				switch idx := strings.Index(cmd, " "); {
-				case cmd[1] == 'm':
-					inner_cmd := cmd[idx+1:]
-					inner_idx := strings.Index(inner_cmd, " ")
-					if inner_idx == -1 {
-						continue
-					}
-					channel := inner_cmd[:inner_idx]
-					msg := inner_cmd[inner_idx+1:]
-					c.Privmsg(channel, msg)
-				case idx == -1:
-					continue
-				case cmd[1] == 'q':
-					reallyquit = true
-					c.Quit(cmd[idx+1 : len(cmd)])
-				case cmd[1] == 's':
-					reallyquit = true
-					c.Close()
-				case cmd[1] == 'j':
-					c.Join(cmd[idx+1 : len(cmd)])
-				}
-			} else {
-				c.Raw(cmd)
-			}
-		}
-	}()
-
-	for !reallyquit {
+	for {
 		// connect to server
 		if err := c.Connect(); err != nil {
 			fmt.Printf("Connection error: %s\n", err)
