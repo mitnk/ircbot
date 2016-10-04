@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Host struct {
@@ -107,6 +108,14 @@ func SaveMessage(host Host, dbname, user, room, nick, msg, typ string, ts time.T
 	room_id := getRoomId(dbname, user, host.Name, room)
 	if room_id == 0 {
 		fmt.Printf("Rood id not found: host:%s room:%s\n", host.Name, room)
+		return
+	}
+	if !utf8.Valid([]byte(nick)) {
+		fmt.Printf("ERROR: nick is not utf-8: %#v\n", nick)
+		return
+	}
+	if !utf8.Valid([]byte(msg)) {
+		fmt.Printf("ERROR: msg is not utf-8: %#v\n", msg)
 		return
 	}
 	_, err := db.Exec("INSERT INTO irc_message "+
