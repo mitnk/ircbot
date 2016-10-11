@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
 	irc "github.com/fluffle/goirc/client"
 	"github.com/mitnk/ircbot/db"
 )
+
+var G = map[string]map[string]string{"showchat": {}}
 
 func main() {
 	var dbname = flag.String("dbname", "ircbot", "PG DB Name")
@@ -31,9 +35,48 @@ func main() {
 		host := hosts[i]
 		go MonitorIRCHost(host, *proxy, *dbname, *user, wg)
 	}
+
+	// set up a goroutine to read commands from stdin
+	in := make(chan string, 4)
+	go func() {
+		con := bufio.NewReader(os.Stdin)
+		for {
+			s, err := con.ReadString('\n')
+			if err != nil {
+				// wha?, maybe ctrl-D...
+				close(in)
+				break
+			}
+			// no point in sending empty lines down the channel
+			if len(s) > 2 {
+				in <- s[0 : len(s)-1]
+			}
+		}
+	}()
+
+	// set up a goroutine to do parsey things with the stuff from stdin
+	go func() {
+		for cmd := range in {
+			if strings.HasPrefix(cmd, ":showchat ") {
+				n := strings.Index(cmd, " ")
+				room := strings.Trim(cmd[n:], " ")
+				if len(room) == 0 || !strings.HasPrefix(room, "#") {
+					fmt.Println("invalid room name, should start with #")
+					continue
+				}
+				if G["showchat"][room] != "t" {
+					G["showchat"][room] = "t"
+				} else {
+					G["showchat"][room] = "f"
+				}
+			}
+		}
+	}()
+
 	// wait for the workers to finish
 	wg.Wait()
 }
+
 
 func MonitorIRCHost(host db.Host, proxy, dbname, user string, wg sync.WaitGroup) {
 	cfg := irc.NewConfig(host.Nick)
@@ -52,7 +95,7 @@ func MonitorIRCHost(host db.Host, proxy, dbname, user string, wg sync.WaitGroup)
 	// e.g. join a channel on connect.
 	c.HandleFunc(irc.CONNECTED,
 		func(conn *irc.Conn, line *irc.Line) {
-			fmt.Println("Connected to IRC Server.")
+			fmt.Printf("connected to server %s\n", host.Name)
 			rooms := db.GetRoomList(host, dbname, user)
 			for i := 0; i < len(rooms); i++ {
 				name := rooms[i].Name
@@ -70,13 +113,15 @@ func MonitorIRCHost(host db.Host, proxy, dbname, user string, wg sync.WaitGroup)
 	c.HandleFunc("DISCONNECTED",
 		func(conn *irc.Conn, line *irc.Line) {
 			wg.Done()
-			fmt.Println("Disconnected from IRC Server.")
+			fmt.Printf("ERROR disconnected from server %s\n", host.Name)
 			quit <- true
 		})
 
 	c.HandleFunc(irc.NOTICE,
 		func(conn *irc.Conn, line *irc.Line) {
-			fmt.Printf("%s %s %s %s\n", line.Nick, line.Cmd, line.Args, line.Time)
+			fmt.Printf("[%s] %s %s %s\n",
+				line.Time.Format("2006-01-02 15:04:05"),
+				line.Nick, line.Cmd, line.Args)
 		})
 
 	c.HandleFunc(irc.PRIVMSG,
@@ -84,18 +129,22 @@ func MonitorIRCHost(host db.Host, proxy, dbname, user string, wg sync.WaitGroup)
 			room := line.Args[0]
 			msg := line.Args[1]
 			db.SaveMessage(host, dbname, user, room, line.Nick, msg, "M", line.Time)
-			fmt.Printf("[%s][%s][%s]%s: %s\n",
-				line.Time.Format("15:04:05"),
-				host.Name, room, line.Nick, msg)
+			if G["showchat"][room] == "t" {
+				fmt.Printf("[%s][%s][%s]%s: %s\n",
+					line.Time.Format("15:04:05"),
+					host.Name, room, line.Nick, msg)
+			}
 		})
 	c.HandleFunc(irc.ACTION,
 		func(conn *irc.Conn, line *irc.Line) {
 			room := line.Args[0]
 			msg := line.Args[1]
 			db.SaveMessage(host, dbname, user, room, line.Nick, msg, "A", line.Time)
-			fmt.Printf("[%s][%s][%s]%s [ACTION] %s\n",
-				line.Time.Format("15:04:05"),
-				host.Name, room, line.Nick, msg)
+			if G["showchat"][room] == "t" {
+				fmt.Printf("[%s][%s][%s]%s [ACTION] %s\n",
+					line.Time.Format("15:04:05"),
+					host.Name, room, line.Nick, msg)
+			}
 		})
 
 	for {
